@@ -4,23 +4,33 @@ using UnityEngine.AI;
 public class Customer : MonoBehaviour
 {
     public Shelf targetShelf;
-    public Transform exitPoint; // касса
+    public Transform exitPoint; // касса / выход
     public Transform cashPoint;
     public QueueManager queueManager;
 
     public static Customer WaitingCustomer;
 
     private NavMeshAgent agent;
+    private Animator animator;
+
     private Item carriedItem;
     private Item placedItem;
 
-    private bool movingToCash = false;
+    private bool goingToCash = false;
     private bool waitingForCashier = false;
-    private bool inQueue = false;
+
+    public void MoveToQueuePoint(Transform point)
+    {
+        if (point == null) return;
+
+        agent.isStopped = false;
+        agent.SetDestination(point.position);
+    }
 
     void Start()
     {
         agent = GetComponent<NavMeshAgent>();
+        animator = GetComponentInChildren<Animator>();
 
         if (cashPoint == null)
         {
@@ -31,11 +41,9 @@ public class Customer : MonoBehaviour
                 cashPoint = point != null ? point : cashRegister.transform;
             }
         }
+
         if (cashPoint == null)
             Debug.LogWarning("Customer: CashRegister not found");
-
-        if (queueManager == null)
-            queueManager = FindObjectOfType<QueueManager>();
 
         if (targetShelf != null)
         {
@@ -46,8 +54,14 @@ public class Customer : MonoBehaviour
 
     void Update()
     {
+        // 🎬 АНИМАЦИЯ (Idle / Walk)
+        if (animator != null && agent != null)
+        {
+            animator.SetFloat("Speed", agent.velocity.magnitude);
+        }
+
         // 1️⃣ Пришёл к полке
-        if (!movingToCash && carriedItem == null && targetShelf != null)
+        if (!goingToCash && carriedItem == null && targetShelf != null)
         {
             if (!agent.pathPending && agent.remainingDistance <= 1.2f)
             {
@@ -56,21 +70,8 @@ public class Customer : MonoBehaviour
             }
         }
 
-        // 2️⃣ Первый в очереди → идёт к кассе если касса свободна
-        if (inQueue && !movingToCash && !waitingForCashier && IsFirstInQueue() && IsCashEmpty())
-        {
-            Transform targetPoint = cashPoint != null ? cashPoint : exitPoint;
-            if (targetPoint != null)
-            {
-                movingToCash = true;
-                agent.isStopped = false;
-                agent.SetDestination(targetPoint.position);
-                Debug.Log("Customer: moving to cash");
-            }
-        }
-
-        // 3️⃣ Пришёл к кассе → ждёт
-        if (movingToCash && !waitingForCashier)
+        // 2️⃣ Пришёл к кассе → кладёт товар и ждёт
+        if (goingToCash && !waitingForCashier)
         {
             if (!agent.pathPending && agent.remainingDistance <= 1.2f)
             {
@@ -78,6 +79,7 @@ public class Customer : MonoBehaviour
                 waitingForCashier = true;
                 agent.isStopped = true;
                 WaitingCustomer = this;
+
                 Debug.Log("Customer: waiting for cashier");
             }
         }
@@ -96,20 +98,14 @@ public class Customer : MonoBehaviour
 
         item.transform.SetParent(transform);
         item.transform.localPosition = Vector3.forward * 0.5f;
+
         Debug.Log("Customer: took item from shelf");
 
-        // 👉 идёт к кассе
+        goingToCash = true;
+
         if (queueManager != null)
         {
             queueManager.JoinQueue(this);
-            inQueue = true;
-            Debug.Log("Customer: joined queue");
-        }
-        else
-        {
-            movingToCash = true;
-            agent.SetDestination(exitPoint.position);
-            Debug.Log("Customer: going to cash");
         }
     }
 
@@ -135,29 +131,7 @@ public class Customer : MonoBehaviour
         placedItem.transform.localPosition = Vector3.zero;
         placedItem.transform.localRotation = Quaternion.identity;
 
-        Debug.Log("Customer placed item on cash");
-    }
-
-    public void MoveToQueuePoint(Transform point)
-    {
-        if (point == null || movingToCash || waitingForCashier)
-            return;
-
-        agent.isStopped = false;
-        agent.SetDestination(point.position);
-    }
-
-    bool IsFirstInQueue()
-    {
-        return queueManager != null && queueManager.GetFirstCustomer() == this;
-    }
-
-    bool IsCashEmpty()
-    {
-        if (cashPoint == null)
-            return false;
-
-        return cashPoint.GetComponentInChildren<Item>() == null;
+        Debug.Log("Customer: placed item on cash");
     }
 
     // 👇 ИГРОК ЗАБИРАЕТ ТОВАР
@@ -175,14 +149,16 @@ public class Customer : MonoBehaviour
     // 👇 ПОСЛЕ ОПЛАТЫ
     public void Leave()
     {
+        if (queueManager != null)
+        {
+            queueManager.LeaveQueue(this);
+        }
+
         waitingForCashier = false;
         agent.isStopped = false;
 
         if (WaitingCustomer == this)
             WaitingCustomer = null;
-
-        if (queueManager != null)
-            queueManager.LeaveQueue(this);
 
         Destroy(gameObject, 3f);
         Debug.Log("Customer: leaving");
