@@ -5,6 +5,7 @@ TagManager:
   serializedVersion: 3
   tags:
   - Product
+  - Customer
   layers:
   - Default
   - TransparentFX
